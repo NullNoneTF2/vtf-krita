@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=krita_vtf
+X-Python-2-Compatible=false
+X-Krita-Manual=
+Name=VTF Import/Export
+Comment=Import and export Valve Texture Format (.vtf) files, with optional .vmt material generation
