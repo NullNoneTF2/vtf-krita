@@ -2,7 +2,7 @@
 
 A Krita plugin for importing and exporting Valve Texture Format (.vtf) files, with optional .vmt material generation.
 
-![VTF Krita banner](art/vtf-krita logo nomargin.png)
+![VTF Krita banner](art/vtf-krita-logo-nomargin.png)
 
 ## What this project includes
 
