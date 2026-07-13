@@ -1,0 +1,71 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to publish (for example v0.1.0)
+        required: false
+        default: v0.1.0
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'v0.1.0' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev git zip
+
+      - name: Build libtxc_dxtn
+        run: |
+          cmake -S libtxc_dxtn -B libtxc_dxtn/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build libtxc_dxtn/build -j2
+
+      - name: Build VTFLib
+        run: |
+          cmake -S VTFLib -B VTFLib/build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DLIBTXC_DXTN_LIBRARY=$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a
+          cmake --build VTFLib/build -j2
+
+      - name: Copy native binary into plugin folder
+        run: |
+          mkdir -p krita-plugin-source/bin/linux
+          cp VTFLib/build/src/libVTFLib13.so krita-plugin-source/bin/linux/libVTFLib13.so
+
+      - name: Check Python syntax
+        run: |
+          python -m compileall krita-plugin-source
+
+      - name: Create release archive
+        run: |
+          mkdir -p dist/release/krita_vtf
+          cp -R krita-plugin-source/. dist/release/krita_vtf/
+          cp krita-plugin-source/krita_vtf.desktop dist/release/krita_vtf.desktop
+          cd dist/release
+          zip -r ../../krita-vtf-${RELEASE_TAG}.zip krita_vtf krita_vtf.desktop
+          cd ../..
+          ls -lh krita-vtf-${RELEASE_TAG}.zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          body: |
+            Automated release build for ${{ env.RELEASE_TAG }}.
+
+            This package contains the current Krita plugin sources and the Linux VTFLib binary needed for export.
+          files: |
+            krita-vtf-${{ env.RELEASE_TAG }}.zip
