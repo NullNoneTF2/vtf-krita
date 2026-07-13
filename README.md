@@ -15,6 +15,10 @@ This repository contains the source for a Krita plugin with:
 
 The plugin is built around a patched VTFLib fork and a portable DXT/S3TC compression backend, so it can work without the proprietary Windows-only nvDXTLib dependency used by some older builds.
 
+## Disclaimer
+
+This project was assembled with help from Claude. The main contribution from that assistance was the Python-side integration work for the Krita plugin. The VTFLib and libtxc_dxtn components were used as supporting libraries to help link the native code into a working DLL, rather than being authored as part of the AI-assisted portion.
+
 ## Project layout
 
 - [BUILD.md](BUILD.md) — build instructions for the bundled native library
