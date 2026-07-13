@@ -1,10 +1,11 @@
 # VTF Krita
 
-> Beta / experimental release: this project is a personal, learning-oriented effort and not a polished production tool. I threw this together in the hope it would be useful.
-
-A Krita plugin for importing and exporting Valve Texture Format (.vtf) files, with optional .vmt material generation.
+> Beta / experimental release: this project is just something I threw together in the hope it would be useful.
 
 ![VTF Krita banner](art/vtf-krita-logo-nomargin.png)
+
+A Krita plugin for importing and exporting Valve Texture Format (.vtf) files.
+(or really a clone of VTFEdit's VTF functions.)
 
 ## What this project includes
 
@@ -21,7 +22,7 @@ The plugin is built around a patched VTFLib fork and a portable DXT/S3TC compres
 
 ## Disclaimer
 
-This project was assembled with help from Claude. The main contribution from that assistance was the Python-side integration work for the Krita plugin. The VTFLib and libtxc_dxtn components were used as supporting libraries to help link the native code into a working DLL, rather than being authored as part of the AI-assisted portion.
+This project was assembled with help from Claude Anthropic. (Yes I know slop.) The main contribution from that assistance was the Python-side integration work for the Krita plugin. The VTFLib and libtxc_dxtn components were used as supporting libraries to help link the native code into a working DLL.
 
 ## Project layout
 
