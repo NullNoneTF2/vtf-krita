@@ -1,0 +1,52 @@
+name: Build preview artifact
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-linux-preview:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev git
+
+      - name: Build libtxc_dxtn
+        run: |
+          cmake -S libtxc_dxtn -B libtxc_dxtn/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build libtxc_dxtn/build -j2
+
+      - name: Build VTFLib
+        run: |
+          cmake -S VTFLib -B VTFLib/build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DLIBTXC_DXTN_LIBRARY=$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a
+          cmake --build VTFLib/build -j2
+
+      - name: Copy native binary into plugin folder
+        run: |
+          mkdir -p krita-plugin-source/bin/linux
+          cp VTFLib/build/src/libVTFLib13.so krita-plugin-source/bin/linux/libVTFLib13.so
+
+      - name: Check Python syntax
+        run: |
+          python -m compileall krita-plugin-source
+
+      - name: Package preview artifact
+        run: |
+          mkdir -p dist/preview/krita_vtf
+          cp -R krita-plugin-source/. dist/preview/krita_vtf/
+          cp krita-plugin-source/krita_vtf.desktop dist/preview/krita_vtf.desktop
+          cd dist
+          zip -r preview.zip preview
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtf-krita-preview-linux
+          path: dist/preview.zip
