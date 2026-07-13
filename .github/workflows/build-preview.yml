@@ -48,5 +48,5 @@ jobs:
       - name: Upload preview artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vtf-krita-preview-linux
+          name: vtf-krita-preview
           path: dist/preview.zip
