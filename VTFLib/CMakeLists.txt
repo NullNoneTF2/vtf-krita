@@ -57,6 +57,18 @@ elseif(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wextra -pedantic -Wno-error -Wno-attributes -O3")
 endif()
 
+if((CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX) AND WIN32)
+	# Statically link the MinGW runtime (libgcc / libstdc++ / libwinpthread) into
+	# libVTFLib13.dll. Without this, the DLL only loads on a machine that happens
+	# to have a matching MSYS2/MinGW install (like the CI runner) providing
+	# libgcc_s_seh-1.dll, libstdc++-6.dll and libwinpthread-1.dll on PATH. End
+	# users installing the plugin into Krita normally have none of these, which
+	# surfaces as a confusing "Could not find module ... (or one of its
+	# dependencies)" error from ctypes even though the DLL file itself is present.
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive")
+	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc -static-libstdc++ -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive")
+endif()
+
 if(USE_NVDXT AND ${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	add_definitions(-DUSE_NVDXT)
 	# TODO: libraries?
