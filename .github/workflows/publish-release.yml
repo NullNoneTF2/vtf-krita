@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  build-linux:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'v0.1.0' }}
@@ -27,7 +27,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libgl1-mesa-dev git zip
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev git
 
       - name: Build libtxc_dxtn
         run: |
@@ -39,20 +39,87 @@ jobs:
           cmake -S VTFLib -B VTFLib/build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DLIBTXC_DXTN_LIBRARY=$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a
           cmake --build VTFLib/build -j2
 
-      - name: Copy native binary into plugin folder
+      - name: Copy Linux binary into plugin folder
         run: |
           mkdir -p krita-plugin-source/bin/linux
           cp VTFLib/build/src/libVTFLib13.so krita-plugin-source/bin/linux/libVTFLib13.so
+
+      - name: Upload Linux binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-lib
+          path: krita-plugin-source/bin/linux/libVTFLib13.so
 
       - name: Check Python syntax
         run: |
           python -m compileall krita-plugin-source
 
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 and build dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: |
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-mesa
+
+      - name: Build libtxc_dxtn and VTFLib
+        shell: msys2 {0}
+        run: |
+          cd "$GITHUB_WORKSPACE/libtxc_dxtn"
+          mkdir -p build
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build build -j2
+          cd "$GITHUB_WORKSPACE/VTFLib"
+          mkdir -p build
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DGL_INCLUDE_DIR=/mingw64/include -DLIBTXC_DXTN_LIBRARY="$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a"
+          cmake --build build -j2
+          mkdir -p "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows"
+          cp build/src/libVTFLib13.dll "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows/libVTFLib13.dll"
+
+      - name: Upload Windows binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-lib
+          path: krita-plugin-source/bin/windows/libVTFLib13.dll
+
+  package-and-release:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows]
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'v0.1.0' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-lib
+          path: linux-lib
+
+      - name: Download Windows binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-lib
+          path: windows-lib
+
       - name: Create release archive
         run: |
-          mkdir -p dist/release/krita_vtf
+          mkdir -p dist/release/krita_vtf/bin/linux dist/release/krita_vtf/bin/windows
           cp -R krita-plugin-source/. dist/release/krita_vtf/
           cp krita-plugin-source/krita_vtf.desktop dist/release/krita_vtf.desktop
+          cp linux-lib/libVTFLib13.so dist/release/krita_vtf/bin/linux/libVTFLib13.so
+          cp windows-lib/libVTFLib13.dll dist/release/krita_vtf/bin/windows/libVTFLib13.dll
           cd dist/release
           zip -r ../../krita-vtf-${RELEASE_TAG}.zip krita_vtf krita_vtf.desktop
           cd ../..
@@ -66,6 +133,6 @@ jobs:
           body: |
             Automated release build for ${{ env.RELEASE_TAG }}.
 
-            This package contains the current Krita plugin sources and the Linux VTFLib binary needed for export.
+            This package contains the current Krita plugin sources and the Linux and Windows VTFLib binaries needed for export.
           files: |
             krita-vtf-${{ env.RELEASE_TAG }}.zip

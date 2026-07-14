@@ -33,15 +33,80 @@ jobs:
           mkdir -p krita-plugin-source/bin/linux
           cp VTFLib/build/src/libVTFLib13.so krita-plugin-source/bin/linux/libVTFLib13.so
 
+      - name: Upload Linux binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-lib
+          path: krita-plugin-source/bin/linux/libVTFLib13.so
+
+  build-windows-preview:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 and build dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: |
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-mesa
+
+      - name: Build libtxc_dxtn and VTFLib
+        shell: msys2 {0}
+        run: |
+          cd "$GITHUB_WORKSPACE/libtxc_dxtn"
+          mkdir -p build
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build build -j2
+          cd "$GITHUB_WORKSPACE/VTFLib"
+          mkdir -p build
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DGL_INCLUDE_DIR=/mingw64/include -DLIBTXC_DXTN_LIBRARY="$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a"
+          cmake --build build -j2
+          mkdir -p "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows"
+          cp build/src/libVTFLib13.dll "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows/libVTFLib13.dll"
+
+      - name: Upload Windows binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-lib
+          path: krita-plugin-source/bin/windows/libVTFLib13.dll
+
+  package-preview:
+    needs: [build-linux-preview, build-windows-preview]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Check Python syntax
         run: |
           python -m compileall krita-plugin-source
 
-      - name: Package preview artifact
+      - name: Download Linux binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-lib
+          path: linux-lib
+
+      - name: Download Windows binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-lib
+          path: windows-lib
+
+      - name: Create preview package
         run: |
-          mkdir -p dist/preview/krita_vtf
+          mkdir -p dist/preview/krita_vtf/bin/linux dist/preview/krita_vtf/bin/windows
           cp -R krita-plugin-source/. dist/preview/krita_vtf/
           cp krita-plugin-source/krita_vtf.desktop dist/preview/krita_vtf.desktop
+          cp linux-lib/libVTFLib13.so dist/preview/krita_vtf/bin/linux/libVTFLib13.so
+          cp windows-lib/libVTFLib13.dll dist/preview/krita_vtf/bin/windows/libVTFLib13.dll
           cd dist
           zip -r preview.zip preview
 
