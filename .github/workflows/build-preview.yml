@@ -57,7 +57,7 @@ jobs:
             mingw-w64-x86_64-mesa
 
       - name: Build libtxc_dxtn and VTFLib
-        shell: bash
+        shell: bash {0}
         run: |
           export PATH="/mingw64/bin:$PATH"
           cd "$GITHUB_WORKSPACE/libtxc_dxtn"
