@@ -1,6 +1,6 @@
 # Patches applied relative to upstream panzi/VTFLib
 
-The exact diff is in [patches.diff](patches.diff). Two changes are included:
+The exact diff is in [patches.diff](patches.diff). Three changes are included:
 
 ## 1. CMakeLists.txt: relax -Werror
 
@@ -24,6 +24,19 @@ The original logic rejected some valid DXT mip dimensions before the later
 clamping logic could handle them. The patch narrows the rejection to dimensions
 that are both at least 4 pixels and still misaligned, which allows valid
 smaller mip levels to proceed correctly.
+
+## 3. CMakeLists.txt: statically link the MinGW runtime on Windows
+
+When built with MinGW-w64 GCC, libVTFLib13.dll dynamically depended on
+libgcc_s_seh-1.dll, libstdc++-6.dll, and libwinpthread-1.dll from the
+toolchain's runtime. Those DLLs only exist on a machine with a matching
+MSYS2/MinGW install (such as the CI build runner), so the plugin failed to
+load for end users with a "Could not find module ... (or one of its
+dependencies)" ctypes error, even though libVTFLib13.dll itself was present.
+The patch adds `-static-libgcc -static-libstdc++` plus a whole-archive static
+link of `winpthread` to `CMAKE_EXE_LINKER_FLAGS`/`CMAKE_SHARED_LINKER_FLAGS`
+on Windows GNU builds, so the shipped DLL carries its own runtime and has no
+external dependency on the build toolchain being installed.
 
 ## Notes on the non-patched nvDXT-only paths
 
