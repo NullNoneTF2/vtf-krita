@@ -57,11 +57,7 @@ same workflow works on non-Windows builds and on builds without nvDXTLib.
 - UI: Export dialog adds `Full Options` toggle to show advanced formats and a `Use Defaults` button.
 - UX: Export dialog option values persist via `QSettings` and auto-save on change.
 - Feature: Animated VTF import prompts to edit a single frame or export all frames to a folder.
-- Feature: Create Animated VTF from Frames — new menu action to build animated VTFs from an ordered frames folder.
+- Feature: Create Animated VTF from Frames, new menu action to build animated VTFs from an ordered frames folder.
 - Feature: Animated VTF export supports compressed formats (DXT1/DXT5) with per-frame, per-mipmap conversion.
 - UX: Exports run in background threads with progress dialogs and cancel support to avoid freezing Krita for long exports.
 - Misc: Added `EXPORTABLE_FORMATS_CORE` / `EXPORTABLE_FORMATS_FULL` to simplify the default Export UI.
-
-Notes:
-- The animated export implements safe per-frame compression and mip generation mirroring the single-frame pipeline to ensure cross-platform behavior without relying on nvDXTLib batch calls.
-- If you want non-modal progress or more detailed stage messages, I can refine the progress UI in a follow-up.
