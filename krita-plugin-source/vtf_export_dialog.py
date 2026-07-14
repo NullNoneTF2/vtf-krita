@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (
     QCheckBox, QDoubleSpinBox, QSpinBox, QLineEdit, QPlainTextEdit,
     QDialogButtonBox, QLabel, QTabWidget, QWidget,
 )
+from PyQt5.QtCore import QSettings
 
 from . import vtf_bindings as vtf
 
@@ -19,22 +20,44 @@ class VTFExportDialog(QDialog):
         tabs = QTabWidget(self)
         layout.addWidget(tabs)
 
+        # Load persistent settings
+        self._settings = QSettings("VTFKrita", "vtf_plugin")
+
         # ---------------- Basic tab -----------------------------------
         basic = QWidget()
         form = QFormLayout(basic)
 
         self.format_combo = QComboBox()
-        self.format_combo.addItems(vtf.EXPORTABLE_FORMATS)
-        self.format_combo.setCurrentText("DXT5")
+        # Start with a compact, user-friendly list; allow expanding to
+        # the full list via the 'Full Options' checkbox below.
+        self.format_combo.addItems(vtf.EXPORTABLE_FORMATS_CORE)
+        self.format_combo.setCurrentText(self._settings.value("format", "DXT5"))
         form.addRow("Format:", self.format_combo)
+
+        self.full_options_check = QCheckBox("Full Options (show advanced formats)")
+        self.full_options_check.setChecked(self._settings.value("full_options", False, type=bool))
+        def _toggle_formats(checked):
+            cur = self.format_combo.currentText()
+            self.format_combo.clear()
+            if checked:
+                self.format_combo.addItems(vtf.EXPORTABLE_FORMATS_FULL)
+            else:
+                self.format_combo.addItems(vtf.EXPORTABLE_FORMATS_CORE)
+            # restore selection if present
+            if cur in [self.format_combo.itemText(i) for i in range(self.format_combo.count())]:
+                self.format_combo.setCurrentText(cur)
+        self.full_options_check.stateChanged.connect(lambda s: _toggle_formats(bool(s)))
+        # initialize formats list based on saved preference
+        _toggle_formats(self.full_options_check.isChecked())
+        form.addRow(self.full_options_check)
 
         self.version_combo = QComboBox()
         self.version_combo.addItems(vtf.VTF_VERSIONS)
-        self.version_combo.setCurrentText("7.4")
+        self.version_combo.setCurrentText(self._settings.value("version", "7.4"))
         form.addRow("VTF version:", self.version_combo)
 
         self.mipmaps_check = QCheckBox("Generate mipmaps")
-        self.mipmaps_check.setChecked(True)
+        self.mipmaps_check.setChecked(self._settings.value("generate_mipmaps", True, type=bool))
         form.addRow(self.mipmaps_check)
 
         self.mip_filter_combo = QComboBox()
@@ -44,7 +67,7 @@ class VTFExportDialog(QDialog):
         form.addRow("Mipmap filter:", self.mip_filter_combo)
 
         self.thumbnail_check = QCheckBox("Generate thumbnail")
-        self.thumbnail_check.setChecked(True)
+        self.thumbnail_check.setChecked(self._settings.value("generate_thumbnail", True, type=bool))
         form.addRow(self.thumbnail_check)
 
         tabs.addTab(basic, "Basic")
@@ -138,7 +161,33 @@ class VTFExportDialog(QDialog):
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        # Add a small action row: Use Defaults and the OK/Cancel buttons.
+        action_row = QHBoxLayout()
+        self.use_defaults_btn = QLabel()
+        from PyQt5.QtWidgets import QPushButton
+        use_defaults = QPushButton("Use Defaults")
+        use_defaults.clicked.connect(self._use_defaults)
+        action_row.addWidget(use_defaults)
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
         layout.addWidget(buttons)
+
+        # Connect UI changes to automatic saving of options
+        widgets_to_watch = [
+            self.format_combo, self.version_combo, self.mipmaps_check,
+            self.mip_filter_combo, self.thumbnail_check, self.full_options_check,
+        ]
+        for w in widgets_to_watch:
+            if hasattr(w, 'currentTextChanged'):
+                w.currentTextChanged.connect(lambda _t, w=w: self._save_settings())
+            if hasattr(w, 'stateChanged'):
+                w.stateChanged.connect(lambda _s, w=w: self._save_settings())
+        # spinboxes
+        for w in (self.resize_w_spin, self.resize_h_spin, self.nm_scale_spin):
+            w.valueChanged.connect(lambda _v, w=w: self._save_settings())
+
+        # Ensure initial save of any missing defaults
+        self._save_settings()
 
     def get_options(self):
         """Returns (vtf_write_options: dict, vmt_options: dict or None)"""
@@ -190,3 +239,25 @@ class VTFExportDialog(QDialog):
             }
 
         return opts, vmt_opts
+
+    def _save_settings(self):
+        try:
+            self._settings.setValue("format", self.format_combo.currentText())
+            self._settings.setValue("version", self.version_combo.currentText())
+            self._settings.setValue("generate_mipmaps", self.mipmaps_check.isChecked())
+            self._settings.setValue("mipmap_filter", self.mip_filter_combo.currentText())
+            self._settings.setValue("generate_thumbnail", self.thumbnail_check.isChecked())
+            self._settings.setValue("full_options", self.full_options_check.isChecked())
+            self._settings.sync()
+        except Exception:
+            pass
+
+    def _use_defaults(self):
+        # Reset the dialog to the reasonable defaults used by the writer.
+        self.format_combo.setCurrentText("DXT5")
+        self.version_combo.setCurrentText("7.4")
+        self.mipmaps_check.setChecked(True)
+        self.mip_filter_combo.setCurrentText("TRIANGLE")
+        self.thumbnail_check.setChecked(True)
+        self.full_options_check.setChecked(False)
+        self._save_settings()

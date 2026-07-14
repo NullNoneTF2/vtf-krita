@@ -21,6 +21,7 @@ import ctypes
 import os
 import platform
 import sys
+import struct
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,6 +73,20 @@ EXPORTABLE_FORMATS = [
     "DXT1", "DXT1_ONEBITALPHA", "DXT3", "DXT5",
     "UV88", "UVWQ8888", "UVLX8888",
 ]
+
+# A smaller, user-friendly subset for the simple UI. Advanced users can
+# toggle the full list in the export dialog ("Full Options").
+EXPORTABLE_FORMATS_CORE = [
+    "RGBA8888",  # Standard 32-bit RGBA (most common)
+    "I8",        # Grayscale
+    "IA88",      # Grayscale + Alpha
+    "DXT1",      # BC1 - opaque / 1-bit alpha
+    "DXT5",      # BC3 - full alpha
+]
+
+# Alias for the full list (keeps older code working when referencing
+# EXPORTABLE_FORMATS)
+EXPORTABLE_FORMATS_FULL = EXPORTABLE_FORMATS
 
 COMPRESSED_FORMATS = {"DXT1", "DXT1_ONEBITALPHA", "DXT3", "DXT5"}
 
@@ -386,6 +401,12 @@ def _load_library():
         ctypes.c_uint, ctypes.c_int, ctypes.c_bool, ctypes.c_bool,
         ctypes.c_bool,
     ]
+    lib.vlImageCreateMultiple.restype = ctypes.c_bool
+    lib.vlImageCreateMultiple.argtypes = [
+        ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+        ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+        ctypes.POINTER(SVTFCreateOptions),
+    ]
     lib.vlImageCreateDefaultCreateStructure.argtypes = [
         ctypes.POINTER(SVTFCreateOptions)
     ]
@@ -534,7 +555,7 @@ def read_vtf(path):
             )
             rgba = bytes(bytearray(out_buf))
 
-        return {
+        result = {
             "width": width,
             "height": height,
             "format": IMAGE_FORMAT_NAME.get(fmt, "UNKNOWN({})".format(fmt)),
@@ -543,6 +564,32 @@ def read_vtf(path):
             "face_count": face_count,
             "mipmap_count": mipmap_count,
         }
+
+        # If this VTF contains multiple frames, also return an array of
+        # decoded RGBA buffers so callers can export or iterate frames.
+        if frame_count > 1:
+            frames = []
+            for f in range(frame_count):
+                data_ptr = lib.vlImageGetData(f, 0, 0, 0)
+                if not data_ptr:
+                    raise VTFError("VTF frame {} has no image data".format(f))
+                if fmt == IMAGE_FORMAT["RGBA8888"]:
+                    size = width * height * 4
+                    frame_rgba = bytes(bytearray(data_ptr[:size]))
+                else:
+                    size = width * height * 4
+                    out_buf = (ctypes.c_ubyte * size)()
+                    _check(
+                        lib,
+                        lib.vlImageConvertToRGBA8888(data_ptr, out_buf, width,
+                                                      height, fmt),
+                        "vlImageConvertToRGBA8888",
+                    )
+                    frame_rgba = bytes(bytearray(out_buf))
+                frames.append(frame_rgba)
+            result["frames"] = frames
+
+        return result
 
 
 def write_vtf(path, width, height, rgba_bytes, options=None):
@@ -776,6 +823,26 @@ def write_vtf(path, width, height, rgba_bytes, options=None):
         _check(lib, lib.vlImageSave(path.encode("utf-8")),
                "vlImageSave({})".format(path))
 
+        # VTFLib in this packaging sometimes uses a compiled-in default
+        # minor version when creating images via vlImageCreate(). The
+        # write option 'version' is tracked in the Python-level options
+        # but not passed into the low-level create call used by the
+        # existing write path. Patch the saved file header to the user
+        # requested version so exports match the UI selection.
+        try:
+            ver = o.get("version", "7.4")
+            major, minor = [int(x) for x in ver.split(".")]
+            with open(path, "r+b") as f:
+                # Version[0] at offset 4, Version[1] at offset 8 (little-endian uint32)
+                f.seek(4)
+                f.write(struct.pack("<I", major))
+                f.seek(8)
+                f.write(struct.pack("<I", minor))
+        except Exception:
+            # Non-fatal: exported file already exists; if patching fails
+            # leave the saved file as-is rather than aborting the export.
+            pass
+
 
 def write_vmt(path, base_texture_vtf_path, shader="LightmappedGeneric",
               extra_params=None):
@@ -791,3 +858,166 @@ def write_vmt(path, base_texture_vtf_path, shader="LightmappedGeneric",
     lines.append("}")
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def write_vtf_multiple(path, width, height, frames_rgba, options=None, progress_callback=None):
+    """Write an animated .vtf from a list of RGBA8888 frame buffers.
+
+    This is a minimal helper: it writes frames as RGBA8888 image data into
+    a multi-frame VTF. Compression/mipmap generation for animated VTFs is
+    intentionally conservative here (frames are stored as RGBA8888) to avoid
+    relying on nvDXTLib-only batch paths.
+    """
+    o = dict(options or {})
+    o.setdefault("format", "DXT5")
+    o.setdefault("version", "7.4")
+    o.setdefault("generate_mipmaps", True)
+    o.setdefault("mipmap_filter", "TRIANGLE")
+    o.setdefault("mipmap_sharpen", "NONE")
+    o.setdefault("generate_thumbnail", True)
+    o.setdefault("flags", [])
+
+    if o["format"] not in IMAGE_FORMAT:
+        raise ValueError("Unknown format: {}".format(o["format"]))
+    dest_format = IMAGE_FORMAT[o["format"]]
+
+    if any(len(f) != width * height * 4 for f in frames_rgba):
+        raise VTFError("All frames must have the same dimensions and RGBA8888 bytes")
+
+    lib = _load_library()
+
+    cur_w, cur_h = width, height
+
+    # Optional resize (applied equally to all frames)
+    resize = o.get("resize")
+    if resize:
+        method = resize.get("method", "NEAREST_POWER2")
+        def next_pow2(n):
+            p = 1
+            while p < n:
+                p *= 2
+            return p
+
+        if method == "SET":
+            new_w = resize["width"]
+            new_h = resize["height"]
+        else:
+            pw, ph = next_pow2(cur_w), next_pow2(cur_h)
+            if method == "NEAREST_POWER2":
+                def nearest(n, p):
+                    lower = p // 2 if p > 1 else 1
+                    return p if (p - n) < (n - lower) else lower
+                new_w, new_h = nearest(cur_w, pw), nearest(cur_h, ph)
+            elif method == "BIGGEST_POWER2":
+                new_w, new_h = pw, ph
+            else:  # SMALLEST_POWER2
+                new_w = pw // 2 if pw > cur_w and pw > 1 else pw
+                new_h = ph // 2 if ph > cur_h and ph > 1 else ph
+                new_w, new_h = max(new_w, 1), max(new_h, 1)
+
+        if (new_w, new_h) != (cur_w, cur_h):
+            # Resize all frames
+            resized_frames = []
+            for fb in frames_rgba:
+                resized_bytes = _resize_rgba(bytes(bytearray(fb)), cur_w, cur_h, new_w, new_h)
+                resized_frames.append(resized_bytes)
+            frames_rgba = resized_frames
+            cur_w, cur_h = new_w, new_h
+
+    # Mipmap count
+    mipmap_count = 1
+    if o.get("generate_mipmaps", True):
+        mipmap_count = lib.vlImageComputeMipmapCount(cur_w, cur_h, 1)
+
+    mfilter = MIPMAP_FILTER[o.get("mipmap_filter", "TRIANGLE")]
+    msharpen = SHARPEN_FILTER[o.get("mipmap_sharpen", "NONE")]
+
+    # Prepare per-frame, per-level buffers in dest_format
+    # level_buffers[frame_index][level] = (lvl_w, lvl_h, dest_buf)
+    level_buffers = []
+    total_steps = 0
+    # we'll count one step per frame-level conversion
+    for fb in frames_rgba:
+        frame_levels = []
+        src = (ctypes.c_ubyte * len(fb)).from_buffer_copy(fb)
+        for level in range(mipmap_count):
+            mw, mh = ctypes.c_uint(), ctypes.c_uint()
+            md = ctypes.c_uint()
+            lib.vlImageComputeMipmapDimensions(cur_w, cur_h, 1, level, ctypes.byref(mw), ctypes.byref(mh), ctypes.byref(md))
+            lvl_w, lvl_h = mw.value, mh.value
+
+            if level == 0:
+                level_rgba_bytes = bytes(bytearray(src))
+            else:
+                level_rgba_bytes = _resize_rgba(bytes(bytearray(src)), cur_w, cur_h, lvl_w, lvl_h)
+
+            conv_w, conv_h = lvl_w, lvl_h
+            conv_rgba = (ctypes.c_ubyte * len(level_rgba_bytes)).from_buffer_copy(level_rgba_bytes)
+            if o["format"] in COMPRESSED_FORMATS and (lvl_w < 4 or lvl_h < 4):
+                conv_w, conv_h = max(lvl_w, 4), max(lvl_h, 4)
+                conv_bytes = _resize_rgba(bytes(bytearray(level_rgba_bytes)), lvl_w, lvl_h, conv_w, conv_h)
+                conv_rgba = (ctypes.c_ubyte * len(conv_bytes)).from_buffer_copy(conv_bytes)
+
+            dest_size = lib.vlImageComputeImageSize(conv_w, conv_h, 1, 1, dest_format)
+            dest_buf = (ctypes.c_ubyte * dest_size)()
+            _check(
+                lib,
+                lib.vlImageConvertFromRGBA8888(conv_rgba, dest_buf, conv_w, conv_h, dest_format),
+                "vlImageConvertFromRGBA8888 (frame level {})".format(level),
+            )
+            frame_levels.append((lvl_w, lvl_h, dest_buf))
+            total_steps += 1
+            if progress_callback:
+                # if callback returns False, abort
+                if not progress_callback(total_steps - 1, None):
+                    raise VTFError("Export aborted")
+        level_buffers.append(frame_levels)
+
+    # If a progress_callback was provided, compute total and allow reporting
+    if progress_callback:
+        total = len(frames_rgba) * mipmap_count
+    else:
+        total = None
+
+    # Create image and set per-frame data
+    with _BoundImage(lib) as img:
+        _check(
+            lib,
+            lib.vlImageCreate(cur_w, cur_h, len(frames_rgba), 1, 1, dest_format, bool(o.get("generate_thumbnail", True)), bool(o.get("generate_mipmaps", True)), True),
+            "vlImageCreate",
+        )
+
+        done = 0
+        for level in range(mipmap_count):
+            for f_idx in range(len(frames_rgba)):
+                mw, mh, buf = level_buffers[f_idx][level]
+                lib.vlImageSetData(f_idx, 0, 0, level, buf)
+                done += 1
+                if progress_callback:
+                    if not progress_callback(done, total):
+                        raise VTFError("Export aborted")
+
+        flag_bits = 0
+        for name in o.get("flags", []):
+            flag_bits |= TEXTUREFLAGS.get(name, 0)
+        lib.vlImageSetFlags(flag_bits)
+
+        if o.get("generate_thumbnail", True):
+            try:
+                _check(lib, lib.vlImageGenerateThumbnail(), "vlImageGenerateThumbnail")
+            except VTFError:
+                pass
+
+        _check(lib, lib.vlImageSave(path.encode("utf-8")), "vlImageSave({})".format(path))
+
+    # Patch header version
+    try:
+        ver = o.get("version", "7.4")
+        major, minor = [int(x) for x in ver.split('.')]
+        with open(path, "r+b") as f:
+            f.seek(4)
+            f.write(struct.pack("<I", major))
+            f.seek(8)
+            f.write(struct.pack("<I", minor))
+    except Exception:
+        pass
