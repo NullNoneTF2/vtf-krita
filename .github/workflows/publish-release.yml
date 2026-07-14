@@ -72,19 +72,18 @@ jobs:
             mingw-w64-x86_64-mesa
 
       - name: Build libtxc_dxtn and VTFLib
-        shell: bash
+        shell: msys2 {0}
         run: |
-          export PATH="/mingw64/bin:$PATH"
           cd "$GITHUB_WORKSPACE/libtxc_dxtn"
           mkdir -p build
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build build -j2
           cd "$GITHUB_WORKSPACE/VTFLib"
           mkdir -p build
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DLIBTXC_DXTN_LIBRARY="$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a" -G "MSYS Makefiles"
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DUSE_LIBTXC_DXTN=ON -DGL_INCLUDE_DIR=/mingw64/include -DLIBTXC_DXTN_LIBRARY="$GITHUB_WORKSPACE/libtxc_dxtn/build/liblibtxc_dxtn.a"
           cmake --build build -j2
           mkdir -p "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows"
-          cp VTFLib/build/src/libVTFLib13.dll "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows/libVTFLib13.dll"
+          cp build/src/libVTFLib13.dll "$GITHUB_WORKSPACE/krita-plugin-source/bin/windows/libVTFLib13.dll"
 
       - name: Upload Windows binary artifact
         uses: actions/upload-artifact@v4
