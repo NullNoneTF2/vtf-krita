@@ -1,9 +1,8 @@
-from PyQt5.QtWidgets import (
+from .qt_compat import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QComboBox,
     QCheckBox, QDoubleSpinBox, QSpinBox, QLineEdit, QPlainTextEdit,
-    QDialogButtonBox, QLabel, QTabWidget, QWidget,
+    QDialogButtonBox, QLabel, QTabWidget, QWidget, QSettings, QPushButton,
 )
-from PyQt5.QtCore import QSettings
 
 from . import vtf_bindings as vtf
 
@@ -158,13 +157,12 @@ class VTFExportDialog(QDialog):
         tabs.addTab(vmt_tab, "VMT")
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         # Add a small action row: Use Defaults and the OK/Cancel buttons.
         action_row = QHBoxLayout()
         self.use_defaults_btn = QLabel()
-        from PyQt5.QtWidgets import QPushButton
         use_defaults = QPushButton("Use Defaults")
         use_defaults.clicked.connect(self._use_defaults)
         action_row.addWidget(use_defaults)

@@ -2,9 +2,7 @@ import os
 import traceback
 
 from krita import Extension, Krita
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
-from PyQt5.QtGui import QImage
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
+from .qt_compat import QFileDialog, QMessageBox, QImage, QObject, pyqtSignal, QThread, QProgressDialog
 
 from . import vtf_bindings as vtf
 from .vtf_export_dialog import VTFExportDialog
@@ -43,7 +41,7 @@ class VTFExtension(Extension):
             os.path.basename(doc.fileName() or "texture"))[0] or "texture"
 
         dialog = VTFExportDialog(default_name=default_name)
-        if not dialog.exec_():
+        if not dialog.exec():
             return
         options, vmt_options = dialog.get_options()
 
@@ -107,8 +105,8 @@ class VTFExtension(Extension):
             doc.flatten()
             pixel_data = doc.pixelData(0, 0, width, height)
 
-            qimg = QImage(pixel_data, width, height, QImage.Format_ARGB32)
-            qimg = qimg.convertToFormat(QImage.Format_RGBA8888)
+            qimg = QImage(pixel_data, width, height, QImage.Format.Format_ARGB32)
+            qimg = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
             ptr = qimg.bits()
             ptr.setsize(width * height * 4)
             rgba_bytes = bytearray(ptr)
@@ -135,7 +133,6 @@ class VTFExtension(Extension):
             thread = QThread()
             worker.moveToThread(thread)
 
-            from PyQt5.QtWidgets import QProgressDialog
             progress = QProgressDialog("Exporting VTF...", "Cancel", 0, 0)
             progress.setWindowTitle("Export as VTF")
             progress.setModal(True)
@@ -149,7 +146,7 @@ class VTFExtension(Extension):
             progress.canceled.connect(lambda: QMessageBox.information(None, "Export as VTF", "Cancel requested — export will stop when possible."))
 
             thread.start()
-            progress.exec_()
+            progress.exec()
             thread.wait()
         except Exception as e:
             QMessageBox.critical(None, "Export as VTF", "Export failed:\n{}\n\n{}".format(e, traceback.format_exc()))
@@ -169,10 +166,10 @@ class VTFExtension(Extension):
                 msg = QMessageBox()
                 msg.setWindowTitle("Animated VTF")
                 msg.setText("This VTF contains multiple frames. What would you like to do?")
-                edit_btn = msg.addButton("Edit single frame", QMessageBox.AcceptRole)
-                export_btn = msg.addButton("Export all frames to folder", QMessageBox.ActionRole)
-                cancel_btn = msg.addButton(QMessageBox.Cancel)
-                msg.exec_()
+                edit_btn = msg.addButton("Edit single frame", QMessageBox.ButtonRole.AcceptRole)
+                export_btn = msg.addButton("Export all frames to folder", QMessageBox.ButtonRole.ActionRole)
+                cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
+                msg.exec()
                 clicked = msg.clickedButton()
                 if clicked == export_btn:
                     target = QFileDialog.getExistingDirectory(None, "Select output folder for frames")
@@ -180,7 +177,7 @@ class VTFExtension(Extension):
                         return
                     frames = info.get("frames") or []
                     for i, frame_bytes in enumerate(frames):
-                        qimg = QImage(frame_bytes, info["width"], info["height"], QImage.Format_RGBA8888)
+                        qimg = QImage(frame_bytes, info["width"], info["height"], QImage.Format.Format_RGBA8888)
                         png_path = os.path.join(target, f"frame_{i:04d}.png")
                         qimg.save(png_path)
                     QMessageBox.information(None, "Import VTF", f"Exported {len(frames)} frames to {target}")
@@ -211,8 +208,8 @@ class VTFExtension(Extension):
                 alpha_buf[i // 4] = a
                 color_buf[i + 3] = 255
 
-            qimg = QImage(bytes(color_buf), info["width"], info["height"], QImage.Format_RGBA8888)
-            qimg = qimg.convertToFormat(QImage.Format_ARGB32)
+            qimg = QImage(bytes(color_buf), info["width"], info["height"], QImage.Format.Format_RGBA8888)
+            qimg = qimg.convertToFormat(QImage.Format.Format_ARGB32)
             ptr = qimg.bits()
             ptr.setsize(info["width"] * info["height"] * 4)
             layer.setPixelData(bytes(ptr), 0, 0, info["width"], info["height"])
@@ -230,8 +227,8 @@ class VTFExtension(Extension):
                             v = alpha_buf[i]
                             base = i * 4
                             mask_rgba[base:base+4] = bytes((v, v, v, 255))
-                        mq = QImage(bytes(mask_rgba), info["width"], info["height"], QImage.Format_RGBA8888)
-                        mq = mq.convertToFormat(QImage.Format_ARGB32)
+                        mq = QImage(bytes(mask_rgba), info["width"], info["height"], QImage.Format.Format_RGBA8888)
+                        mq = mq.convertToFormat(QImage.Format.Format_ARGB32)
                         mp = mq.bits()
                         mp.setsize(info["width"] * info["height"] * 4)
                         mask.setPixelData(bytes(mp), 0, 0, info["width"], info["height"])
@@ -251,8 +248,8 @@ class VTFExtension(Extension):
                         mask_rgba[base+1] = v
                         mask_rgba[base+2] = v
                         mask_rgba[base+3] = 255
-                    mq = QImage(bytes(mask_rgba), info["width"], info["height"], QImage.Format_RGBA8888)
-                    mq = mq.convertToFormat(QImage.Format_ARGB32)
+                    mq = QImage(bytes(mask_rgba), info["width"], info["height"], QImage.Format.Format_RGBA8888)
+                    mq = mq.convertToFormat(QImage.Format.Format_ARGB32)
                     mp = mq.bits()
                     mp.setsize(info["width"] * info["height"] * 4)
                     mask_layer.setPixelData(bytes(mp), 0, 0, info["width"], info["height"])
@@ -288,14 +285,14 @@ class VTFExtension(Extension):
                 QMessageBox.critical(None, "Create Animated VTF",
                                      "All frames must have identical dimensions")
                 return
-            q = img.convertToFormat(QImage.Format_RGBA8888)
+            q = img.convertToFormat(QImage.Format.Format_RGBA8888)
             bits = q.bits()
             bits.setsize(width * height * 4)
             frames.append(bytes(bits))
 
         # Ask for output VTF path and options
         dialog = VTFExportDialog(default_name=os.path.basename(folder))
-        if not dialog.exec_():
+        if not dialog.exec():
             return
         options, vmt_options = dialog.get_options()
 
@@ -343,7 +340,6 @@ class VTFExtension(Extension):
             thread = QThread()
             worker.moveToThread(thread)
 
-            from PyQt5.QtWidgets import QProgressDialog
             progress = QProgressDialog("Creating animated VTF...", "Cancel", 0, 100)
             progress.setWindowTitle("Create Animated VTF")
             progress.setModal(True)
@@ -359,7 +355,7 @@ class VTFExtension(Extension):
 
             thread.started.connect(worker.run)
             thread.start()
-            progress.exec_()
+            progress.exec()
             thread.wait()
         except Exception as e:
             QMessageBox.critical(None, "Create Animated VTF", "Creation failed:\n{}\n\n{}".format(e, traceback.format_exc()))
